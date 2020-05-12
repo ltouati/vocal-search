@@ -1,0 +1,259 @@
+<html>
+    <head>
+        <script src="https://cdn.WebRTC-Experiment.com/MediaStreamRecorder.js"></script>
+        <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+        <style>
+            body{font-size: 15px;}
+            .google-microphone {
+              width:10em; height:10em;
+              display:flex;
+              justify-content:center;
+              align-items:center;
+            }
+            .shadow {
+              position:relative;
+              margin: 5% auto;
+              border-radius:50%;
+              width:7em; height:7em;
+              background: #DBDBDB;
+              top:20%;
+              display:flex;
+              justify-content:center;
+              align-items:center;
+              box-shadow: 0px 0px 36px 24px #DBDBDB;
+            }
+
+            @-webkit-keyframes move_eye {
+              from {
+                width:7em;
+                height:7em;
+              } to {
+                width:12em;
+                height:10em;
+              }
+            }
+
+            .listening {
+                -webkit-animation: move_eye 0.4s cubic-bezier(0.25,0.1,0.25,1) 0s infinite alternate;
+            }
+
+            .gn{
+              position:relative;
+              margin: 5% auto;
+              background-color:red;
+              border-radius:50%;
+              width:7em; height:7em;
+            }
+            :before, :after{
+              content:'';
+              position:absolute;
+              background-color:#fff;
+            }
+            .gn:after{
+              top:30%; left:43%;
+              height:15%; width:14%;
+              border-top-left-radius:50%;
+              border-top-right-radius:50%;
+            }
+            .gn:before{
+              top:40%; left:43%;
+              height:15%; width:14%;
+              border-bottom-left-radius:50%;
+              border-bottom-right-radius:50%;
+            }
+            .mc{
+              position:absolute;
+              top:50%; left:37%;
+              height:24%;
+              width:26.5%;
+              overflow:hidden;
+            }
+            .mc:before{
+              bottom:50%;
+              width:100%; height:100%;
+              box-sizing:border-box;
+              border-radius:50%;
+              border:0.1em solid #fff;
+              background:none;
+            }
+            .mc:after{
+              top:50%; left:40%;
+              width:20%; height:25%;
+            }
+            .text {
+                vertical-align:middle;
+                height: 250px;
+                font-family: Roboto;
+                font-size: 40;
+                color: #AAAAAA;
+                line-height: 150px;
+                padding-left:30px;
+            }
+
+        </style>
+    </head>
+    <body>
+        <div style="float:left">
+            <div class="google-microphone" id="recorder">
+                <div class="" id="shadow">
+                    <div class="gn">
+                        <div class="mc"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="float:left" class="text">
+                <div id="recognize-content"></div>
+        </div>
+        <script>
+            var mediaConstraints = {
+                audio: true
+            };
+            function appendBuffer(buffer1, buffer2) {
+              var tmp = new Uint8Array(buffer1.byteLength + buffer2.byteLength);
+              tmp.set(new Uint8Array(buffer1), 0);
+              tmp.set(new Uint8Array(buffer2), buffer1.byteLength);
+              return tmp.buffer;
+            };
+            function arrayBufferToBase64( buffer ) {
+                var binary = '';
+                var bytes = new Uint8Array( buffer );
+                var len = bytes.byteLength;
+                for (var i = 0; i < len; i++) {
+                    binary += String.fromCharCode( bytes[ i ] );
+                }
+                return window.btoa( binary );
+            }
+            var totalData = null;
+            var numberOfTimesSameData = 0;
+
+            function NLPProcessor() {
+                this.processSentence = function(sentence,callback) {
+                    var payload = {
+                        document: {
+                            type: 'PLAIN_TEXT',
+                            language: 'fr',
+                            content: sentence
+                        },
+                        encodingType: 'UTF8'
+                    };
+                    var http = new XMLHttpRequest();
+                    http.open("POST", "https://language.googleapis.com/v1/documents:analyzeSyntax?key=[API-KEY]", true);
+                    http.setRequestHeader("Content-type", "application/json");
+                    http.onreadystatechange = function() {//Call a function when the state changes.
+                        if(http.readyState == 4 && http.status == 200 && http.responseText) {
+                            var jsonResponse = JSON.parse(http.responseText);
+                            var searchTerms = "";
+                            for(var i=0;i<jsonResponse.tokens.length;i++) {
+                                if(
+                                    jsonResponse.tokens[i].partOfSpeech.tag=="NOUN" ||
+                                    jsonResponse.tokens[i].partOfSpeech.tag=="ADJ"
+                                ) {
+                                    searchTerms += jsonResponse.tokens[i].lemma + " ";
+                                }
+                            }
+                        }
+                        callback(searchTerms);
+                    }
+                    http.send(JSON.stringify(payload));
+
+                }
+            };
+
+            function SpeechToText() {
+                this.recognizeBlob = function(blob) {
+                    var reader = new window.FileReader();
+                    reader.readAsArrayBuffer(blob);
+                    reader.onloadend = function() {
+                        arr = reader.result;
+                        if(totalData==null) {
+                            totalData = reader.result;
+                        } else {
+                            totalData = appendBuffer(totalData,reader.result.slice(44,reader.result.byteLength-44))
+                        }
+                        var payload = {
+                            config: {
+                                encoding: 'LINEAR16',
+                                sampleRateHertz: 44100,
+                                languageCode: 'fr',
+                            },
+                            audio: {
+                                content: arrayBufferToBase64(totalData)
+                            }
+                        }
+                        var http = new XMLHttpRequest();
+                        http.open("POST", "https://speech.googleapis.com/v1/speech:recognize?key=[API-KEY]", true);
+                        http.setRequestHeader("Content-type", "application/json");
+                        http.onreadystatechange = function() {
+                            if(http.readyState == 4 && http.status == 200 && http.responseText) {
+                                var jsonResponse = JSON.parse(http.responseText);
+                                if(jsonResponse.results) {
+                                    if(document.getElementById("recognize-content").innerText==jsonResponse.results[0].alternatives[0].transcript) {
+                                        numberOfTimesSameData++;
+                                        if(numberOfTimesSameData>=2) {
+                                            var nlpProcessor = new NLPProcessor();
+                                            nlpProcessor.processSentence(jsonResponse.results[0].alternatives[0].transcript,function(terms) {
+                                    if(terms) {
+                                    if(mediaRecorder) {
+                                    mediaRecorder.stop();
+                                    }
+                                                    mediaRecorder = null;
+                                                    document.location =
+                                                    "http://www.atelierprive.com/fr/recherche?orderby=position&orderway=desc&search_query=" +
+                                                    encodeURIComponent(terms.trim()) +
+                                                    "&submit_search=Rechercher";
+                                                }
+                                            });
+                                        }
+                                    } else {
+                                        numberOfTimesSameData = 0;
+                                        document.getElementById("recognize-content").innerText = jsonResponse.results[0].alternatives[0].transcript;
+                                    }
+                                }
+                            }
+                        }
+                        http.send(JSON.stringify(payload));
+                      }
+                }
+            }
+            var mediaRecorder = null;
+
+            document.getElementById("recorder").onclick = function() {
+                document.getElementById('shadow').classList.toggle('shadow');
+                document.getElementById('shadow').classList.toggle('listening');
+                navigator.mediaDevices.getUserMedia({ audio: true }, onMediaSuccess, onMediaError);
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    onMediaSuccess(stream);
+                })
+                .catch(function(err) {
+                    onMediaError(err);
+                });
+            };
+            function onMediaSuccess(stream) {
+                if(mediaRecorder === null) {
+                    totalData = null;
+                    numberOfTimesSameData = 0;
+                    document.getElementById("recognize-content").innerText = "";
+                    mediaRecorder = new MediaStreamRecorder(stream)
+                    mediaRecorder.mimeType = 'audio/wav'; // audio/webm or audio/ogg or audio/wav
+                    mediaRecorder.audioChannels = 1;
+                    mediaRecorder.recorderType = StereoAudioRecorder;
+
+                    mediaRecorder.ondataavailable = function (blob) {
+                        var speechToText = new SpeechToText();
+                        speechToText.recognizeBlob(blob);
+                    };
+                    mediaRecorder.start(500);
+                } else {
+                    mediaRecorder.stop();
+                    mediaRecorder = null;
+                }
+            }
+
+            function onMediaError(e) {
+                console.error('media error', e);
+            }
+        </script>
+    </body>
+</html>
